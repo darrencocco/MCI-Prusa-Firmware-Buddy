@@ -26,3 +26,11 @@
 #ifndef MOTHERBOARD
     #error "Undefined MOTHERBOARD"
 #endif
+
+// Hot-end tuning for MCI MK3.5S with E3D hot-end.
+#undef DEFAULT_Kp
+#undef DEFAULT_Ki
+#undef DEFAULT_Kd
+#define DEFAULT_Kp 31.85
+#define DEFAULT_Ki 6.03
+#define DEFAULT_Kd 42.04

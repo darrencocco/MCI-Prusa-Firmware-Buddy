@@ -1,0 +1,108 @@
+name: Build and Release Firmware
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      create_release:
+        description: 'Create a release'
+        required: true
+        default: true
+        type: boolean
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update && \
+          sudo apt-get install -y \
+            build-essential \
+            cmake \
+            vim \
+            ca-certificates \
+            libssl-dev \
+            libffi-dev \
+            zlib1g-dev \
+            libbz2-dev \
+            libreadline-dev \
+            libsqlite3-dev \
+            liblzma-dev \
+            tk-dev \
+            libgdbm-dev \
+            libncurses5-dev \
+            uuid-dev \
+            valgrind \
+            clang \
+            clang-tools \
+            lldb \
+            strace \
+            lcov \
+            cppcheck \
+            doxygen \
+            fish \
+            python3-requests \
+            python3-dev && \
+          sudo apt-get clean
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Write ECC key to file
+        run: |
+          echo "${{ secrets.ECC_SIGNING_KEY }}" > ec_key.pem
+          chmod 600 ec_key.pem  # Set appropriate permissions
+
+      - name: Build firmware
+        run: |
+          python3 utils/build.py \
+            --preset mk3.5 \
+            --version-suffix "+$(git rev-list --count HEAD 2>/dev/null || echo 0)-tigger" \
+            --signing-key ec_key.pem \
+            --products-dir products
+
+      - name: List build artifacts
+        run: |
+          echo "Build artifacts:"
+          ls -lh products/
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-artifacts
+          path: products/*
+          if-no-files-found: error
+
+      - name: Prepare release tag
+        id: prep
+        run: |
+          if [[ $GITHUB_REF == refs/tags/* ]]; then
+            echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+            echo "release_name=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          else
+            COMMIT_COUNT=$(git rev-list --count HEAD)
+            SHORT_SHA=$(git rev-parse --short HEAD)
+            echo "tag=build-${COMMIT_COUNT}-${SHORT_SHA}" >> $GITHUB_OUTPUT
+            echo "release_name=Build ${COMMIT_COUNT} (${SHORT_SHA})" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create Release
+        if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) || (github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true')
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.prep.outputs.tag }}
+          name: ${{ steps.prep.outputs.release_name }}
+          draft: false
+          prerelease: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+          files: products/*
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
